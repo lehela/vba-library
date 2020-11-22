@@ -17,7 +17,7 @@ Public Sub Save()
     
     KeyValueStore.SetValue "FormatConditions", json
     
-    Clipboard.SetString json
+    Clipboard.SetClipboard json
     
 End Sub
 
@@ -28,7 +28,7 @@ Public Sub Restore()
     json = KeyValueStore.GetValue("FormatConditions")
 
     ' Place a copy in the clipboard
-    Clipboard.SetString json
+    Clipboard.SetClipboard json
 
     Dim dict As Dictionary
     Set dict = JsonConverter.ParseJson(json)
@@ -44,25 +44,33 @@ End Sub
 ' ------------------------------------------------------------------------------------------------------------
 
 
-Public Function serializeFormatConditions(ByRef fcs As FormatConditions) As Dictionary
+Public Function serializeFormatConditions(ByRef obj As FormatConditions) As Dictionary
 
-    Dim dict As Dictionary
-    Set dict = New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
     Dim fc As Object
-    Dim idx As Integer
-    idx = 0
-    For Each fc In fcs
+    Dim idx As Integer: idx = 0
+    Dim fc_name As String
+    
+    
+    For Each fc In obj
         idx = idx + 1
+        
+        fc.AppliesTo.Select
+        
+        fc_name = Format(idx, "00_") & TypeName(fc) & "_" & fc.AppliesTo.Address
         
         Select Case TypeName(fc)
         
-        Case Is = "FormatCondition": dict.Add Format(idx, "000_") & TypeName(fc), serializeFormatCondition(fc)
-        Case Is = "ColorScale": dict.Add Format(idx, "000_") & TypeName(fc), serializeColorScale(fc)
-        Case Is = "IconSetCondition": dict.Add Format(idx, "000_") & TypeName(fc), serializeIconSetCondition(fc)
-        Case Is = "Databar": dict.Add Format(idx, "000_") & TypeName(fc), serializeDatabar(fc)
+        Case Is = "FormatCondition": dict.Add fc_name, serializeFormatCondition(fc)
+        Case Is = "ColorScale": dict.Add fc_name, serializeColorScale(fc)
+        Case Is = "IconSetCondition": dict.Add fc_name, serializeIconSetCondition(fc)
+        Case Is = "Databar": dict.Add fc_name, serializeDatabar(fc)
+        Case Is = "Top10": dict.Add fc_name, serializeTop10(fc)
+        Case Is = "AboveAverage": dict.Add fc_name, serializeAboveAverage(fc)
+        Case Is = "UniqueValues": dict.Add fc_name, serializeUniqueValues(fc)
         End Select
         
     Next
@@ -80,47 +88,60 @@ Public Function deserializeFormatConditions(ByRef fcs As Dictionary, Optional Wo
     Dim key
     Dim obj As Object
     
+    On Error GoTo continue_
+    
     For Each key In fcs.Keys
         Set obj = fcs(key)
         
+        ws(Worksheet).Range(obj("AppliesTo")).Select
+        
         Select Case TypeName(obj)
         Case Is = "Dictionary"
-            Debug.Print obj("AppliesTo")
             Select Case obj("Class")
                 Case Is = "FormatCondition": deserializeFormatCondition obj, Worksheet
                 Case Is = "ColorScale": deserializeColorScale obj, Worksheet
                 Case Is = "IconSetCondition": deserializeIconSetCondition obj, Worksheet
                 Case Is = "Databar": deserializeDatabar obj, Worksheet
+                Case Is = "Top10": deserializeTop10 obj, Worksheet
+                Case Is = "AboveAverage": deserializeAboveAverage obj, Worksheet
+                Case Is = "UniqueValues": deserializeUniqueValues obj, Worksheet
             End Select
         End Select
+continue_:
     Next
     
 End Function
 
-Public Function serializeFormatCondition(ByRef fc As FormatCondition)
+Public Function serializeFormatCondition(ByRef obj As FormatCondition)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Class", "FormatCondition"
-    dict.Add "AppliesTo", fc.AppliesTo.Address
-    dict.Add "AppliesToLocal", fc.AppliesTo.AddressLocal
-    dict.Add "Type", fc.Type
-    dict.Add "Formula1", fc.Formula1
-    dict.Add "Formula2", fc.Formula2
-    dict.Add "NumberFormat", fc.NumberFormat
-    dict.Add "StopIfTrue", fc.StopIfTrue
-    dict.Add "DateOperator", fc.DateOperator
-    dict.Add "Priority", fc.Priority
-    dict.Add "PTCondition", fc.PTCondition
-    dict.Add "ScopeType", fc.ScopeType
-    dict.Add "Text", fc.Text
-    dict.Add "TextOperator", fc.TextOperator
-    
-    dict.Add "Font", serializeFont(fc.Font)
-    dict.Add "Interior", serializeInterior(fc.Interior)
-    dict.Add "Borders", serializeBorders(fc.borders)
+    With obj
+        
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "AppliesToLocal", .AppliesTo.AddressLocal
+        
+        dict.Add "Type", .Type
+        dict.Add "Operator", .Operator
+        dict.Add "DateOperator", .DateOperator
+        dict.Add "Formula1", .Formula1
+        dict.Add "Formula2", .Formula2
+        
+        dict.Add "NumberFormat", .NumberFormat
+        dict.Add "StopIfTrue", .StopIfTrue
+        dict.Add "Priority", .Priority
+        dict.Add "PTCondition", .PTCondition
+        dict.Add "ScopeType", .ScopeType
+        dict.Add "Text", .Text
+        dict.Add "TextOperator", .TextOperator
+        
+        dict.Add "Font", serializeFont(.Font)
+        dict.Add "Interior", serializeInterior(.Interior)
+        dict.Add "Borders", serializeBorders(.borders)
+        
+    End With
     
     Set serializeFormatCondition = dict
     
@@ -128,22 +149,42 @@ End Function
 
 Public Function deserializeFormatCondition(ByRef dict As Dictionary, Optional Worksheet As Worksheet)
 
+    Dim rgAppliesTo As Range
+    Set rgAppliesTo = ws(Worksheet).Range(dict("AppliesTo"))
+
+    rgAppliesTo.Select
+
     Dim fc As FormatCondition
-    Set fc = ws(Worksheet).Range(dict("AppliesTo")).FormatConditions.Add( _
-            Type:=xlExpression, _
+    
+    Select Case dict("Type")
+    
+    ' Expression
+    Case XlFormatConditionType.xlExpression
+        Set fc = rgAppliesTo.FormatConditions.Add( _
+            Type:=dict("Type"), _
+            Formula1:=dict("Formula1") _
+            )
+            
+    ' Others
+    Case Else
+        Set fc = rgAppliesTo.FormatConditions.Add( _
+            Type:=dict("Type"), _
             Operator:=dict("Operator"), _
             Formula1:=dict("Formula1"), _
             Formula2:=dict("Formula2") _
             )
+            
+    End Select
     
     On Error Resume Next
     With fc
+                
         .ScopeType = dict("ScopeType")
         .DateOperator = dict("DateOperator")
         .StopIfTrue = dict("StopIfTrue")
         .Priority = dict("Priority")
-        .NumberFormat = dict("NumberFormat")
-        ' .PTCondition is read-only property
+        .NumberFormat = IfEmpty(dict("NumberFormat"), "General")
+        
         If Not IsEmpty(dict("Text")) Then .Text = dict("Text")
         If Not IsEmpty(dict("TextOperator")) Then .TextOperator = dict("TextOperator")
         
@@ -155,6 +196,183 @@ Public Function deserializeFormatCondition(ByRef dict As Dictionary, Optional Wo
 
 End Function
 
+Public Function serializeTop10(ByRef obj As Top10) As Dictionary
+    
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
+    On Error Resume Next
+    
+    With obj
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "AppliesToLocal", .AppliesTo.AddressLocal
+        dict.Add "Type", .Type
+        
+        dict.Add "CalcFor", .CalcFor
+        dict.Add "NumberFormat", .NumberFormat
+        dict.Add "Percent", .Percent
+        dict.Add "Priority", .Priority
+        dict.Add "Rank", .Rank
+        dict.Add "ScopeType", .ScopeType
+        dict.Add "StopIfTrue", .StopIfTrue
+        dict.Add "TopBottom", .TopBottom
+        
+        dict.Add "Borders", serializeBorders(.borders)
+        dict.Add "Font", serializeFont(.Font)
+        dict.Add "Interior", serializeInterior(.Interior)
+        
+    End With
+
+    Set serializeTop10 = dict
+    
+End Function
+
+Public Function deserializeTop10(ByRef dict As Dictionary, Optional Worksheet As Worksheet)
+    
+    Dim rgAppliesTo As Range
+    Set rgAppliesTo = ws(Worksheet).Range(dict("AppliesTo"))
+
+    rgAppliesTo.Select
+    
+    Dim fc As Top10
+    Set fc = rgAppliesTo.FormatConditions.AddTop10
+        
+    On Error Resume Next
+    
+    With fc
+        
+        .CalcFor = dict("CalcFor")
+        .NumberFormat = IfEmpty(dict("NumberFormat"), "General")
+        .Percent = dict("Percent")
+        .Priority = dict("Priority")
+        .Rank = dict("Rank")
+        .ScopeType = dict("ScopeType")
+        .StopIfTrue = dict("StopIfTrue")
+        .TopBottom = dict("TopBottom")
+        
+        deserializeBorders dict("Borders"), .borders
+        deserializeFont dict("Font"), .Font
+        deserializeInterior dict("Interior"), .Interior
+    
+    End With
+    
+End Function
+
+
+Public Function serializeAboveAverage(ByRef obj As AboveAverage) As Dictionary
+    
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
+    On Error Resume Next
+    
+    With obj
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "AppliesToLocal", .AppliesTo.AddressLocal
+        dict.Add "Type", .Type
+        
+        dict.Add "AboveBelow", .AboveBelow
+        dict.Add "CalcFor", .CalcFor
+        dict.Add "NumberFormat", .NumberFormat
+        dict.Add "NumStdDev", .NumStdDev
+        dict.Add "Priority", .Priority
+        dict.Add "ScopeType", .ScopeType
+        dict.Add "StopIfTrue", .StopIfTrue
+        
+        dict.Add "Borders", serializeBorders(.borders)
+        dict.Add "Font", serializeFont(.Font)
+        dict.Add "Interior", serializeInterior(.Interior)
+        
+    End With
+
+    Set serializeAboveAverage = dict
+    
+End Function
+
+Public Function deserializeAboveAverage(ByRef dict As Dictionary, Worksheet As Worksheet)
+    
+    Dim rgAppliesTo As Range
+    Set rgAppliesTo = ws(Worksheet).Range(dict("AppliesTo"))
+
+    rgAppliesTo.Select
+    
+    Dim fc As AboveAverage
+    Set fc = rgAppliesTo.FormatConditions.AddAboveAverage
+        
+    On Error Resume Next
+    
+    With fc
+    
+        .AboveBelow = dict("AboveBelow")
+        .CalcFor = dict("CalcFor")
+        .NumberFormat = IfEmpty(dict("NumberFormat"), "General")
+        .NumStdDev = dict("NumStdDev")
+        .Priority = dict("Priority")
+        .ScopeType = dict("ScopeType")
+        .Rank = dict("Rank")
+        .StopIfTrue = dict("StopIfTrue")
+        
+        deserializeBorders dict("Borders"), .borders
+        deserializeFont dict("Font"), .Font
+        deserializeInterior dict("Interior"), .Interior
+        
+    End With
+    
+End Function
+
+Public Function serializeUniqueValues(ByRef obj As UniqueValues) As Dictionary
+    
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
+    On Error Resume Next
+    
+    With obj
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "AppliesToLocal", .AppliesTo.AddressLocal
+        dict.Add "Type", .Type
+    
+        dict.Add "DupeUnique", .DupeUnique
+        dict.Add "NumberFormat", .NumberFormat
+        dict.Add "Priority", .Priority
+        dict.Add "ScopeType", .ScopeType
+        dict.Add "StopIfTrue", .StopIfTrue
+        
+        dict.Add "Borders", serializeBorders(.borders)
+        dict.Add "Font", serializeFont(.Font)
+        dict.Add "Interior", serializeInterior(.Interior)
+        
+    End With
+
+    Set serializeUniqueValues = dict
+    
+End Function
+
+Public Function deserializeUniqueValues(ByRef dict As Dictionary, Worksheet As Worksheet)
+    
+    Dim rgAppliesTo As Range
+    Set rgAppliesTo = ws(Worksheet).Range(dict("AppliesTo"))
+
+    rgAppliesTo.Select
+    
+    Dim fc As UniqueValues
+    Set fc = rgAppliesTo.FormatConditions.AddUniqueValues
+        
+    On Error Resume Next
+    
+    With fc
+        .DupeUnique = dict("DupeUnique")
+        .NumberFormat = IfEmpty(dict("NumberFormat"), "General")
+        .Priority = dict("Priority")
+        .ScopeType = dict("ScopeType")
+        .StopIfTrue = dict("StopIfTrue")
+        
+        deserializeBorders dict("Borders"), .borders
+        deserializeFont dict("Font"), .Font
+        deserializeInterior dict("Interior"), .Interior
+        
+    End With
+    
+End Function
+
+
 
 ' ------------------------------------------------------------------------------------------------------------
 '
@@ -162,49 +380,56 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeFont(ByRef fnt As Font)
+Public Function serializeFont(ByRef obj As Font)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Name", fnt.Name
-    dict.Add "Background", fnt.Background
-    dict.Add "Bold", fnt.Bold
-    dict.Add "Color", fnt.Color
-    dict.Add "ColorIndex", fnt.ColorIndex
-    dict.Add "FontStyle", fnt.FontStyle
-    dict.Add "Size", fnt.Size
-    dict.Add "Strikethrough", fnt.Strikethrough
-    dict.Add "Subscript", fnt.Subscript
-    dict.Add "Superscript", fnt.Superscript
-    dict.Add "ThemeColor", fnt.ThemeColor
-    dict.Add "ThemeFont", fnt.ThemeFont
-    dict.Add "TintAndShade", fnt.TintAndShade
-    dict.Add "Underline", fnt.Underline
-
+    With obj
+        dict.Add "Name", .Name
+        dict.Add "Background", .Background
+        dict.Add "Bold", .Bold
+        dict.Add "Color", .Color
+        dict.Add "ColorIndex", .ColorIndex
+        dict.Add "FontStyle", .FontStyle
+        dict.Add "Size", .Size
+        dict.Add "Strikethrough", .Strikethrough
+        dict.Add "Subscript", .Subscript
+        dict.Add "Superscript", .Superscript
+        dict.Add "ThemeColor", .ThemeColor
+        dict.Add "ThemeFont", .ThemeFont
+        dict.Add "TintAndShade", .TintAndShade
+        dict.Add "Underline", .Underline
+    End With
+    
     Set serializeFont = dict
     
 End Function
 
-Public Function deserializeFont(ByRef dict As Dictionary, fnt As Font)
+Public Function deserializeFont(ByRef dict As Dictionary, obj As Font)
 
     On Error Resume Next
 
-    With fnt
+    With obj
         
-        .Color = dict("Color")
-        .ColorIndex = dict("ColorIndex")
+        .Name = dict("Name")
+        
+        If dict("ThemeColor") <> 0 Then
+            .ThemeFont = dict("ThemeFont")
+            .ThemeColor = dict("ThemeColor")
+        Else
+            .ColorIndex = IfEmpty(dict("ColorIndex"), XlColorIndex.xlColorIndexAutomatic)
+            .Color = dict("Color")
+        End If
+        
+        .TintAndShade = CDbl(dict("TintAndShade"))
         .FontStyle = dict("FontStyle")
         .Italic = dict("Italic")
-        .Name = dict("Name")
         .Size = dict("Size")
         .Strikethrough = dict("Strikethrough")
         .Subscript = dict("Subscript")
         .Superscript = dict("Superscript")
-        .ThemeFont = dict("ThemeFont")
-        .ThemeColor = dict("ThemeColor")
-        .TintAndShade = dict("TintAndShade")
         .Underline = dict("Underline")
     
     End With
@@ -217,24 +442,51 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeInterior(ByRef intr As Interior)
+Public Function serializeInterior(ByRef obj As Interior) As Dictionary
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Color", intr.Color
-    dict.Add "ColorIndex", intr.ColorIndex
-    ' dict.Add "Gradient", intr.Gradient
-    dict.Add "InvertIfNegative", intr.InvertIfNegative
-    dict.Add "Pattern", intr.Pattern
-    dict.Add "PatternColor", intr.PatternColor
-    dict.Add "PatternColorIndex", IfNull(intr.PatternColorIndex, xlAutomatic)
-    
-    dict.Add "PatternThemeColor", intr.PatternThemeColor
-    dict.Add "PatternTintAndShade", intr.PatternTintAndShade
-    dict.Add "ThemeColor", intr.ThemeColor
-    dict.Add "TintAndShade", intr.TintAndShade
+    With obj
+        Select Case True
+        
+        ' Default Case, no pattern used
+        Case IsNull(.Pattern)
+            dict.Add "Color", .Color
+            dict.Add "ColorIndex", .ColorIndex
+            dict.Add "InvertIfNegative", .InvertIfNegative
+            dict.Add "ThemeColor", .ThemeColor
+            dict.Add "TintAndShade", .TintAndShade
+        
+        ' Gradient Patterns
+        Case .Pattern = XlPattern.xlPatternRectangularGradient
+            dict.Add "Pattern", .Pattern
+            dict.Add "Gradient", serializeRectangularGradient(.Gradient)
+                        
+        Case .Pattern = XlPattern.xlPatternLinearGradient
+            dict.Add "Pattern", .Pattern
+            dict.Add "Gradient", serializeLinearGradient(.Gradient)
+        
+        ' Solid Color
+        Case .Pattern = XlPattern.xlPatternSolid
+            dict.Add "Pattern", .Pattern
+            dict.Add "Color", .Color
+            dict.Add "ColorIndex", .ColorIndex
+            dict.Add "InvertIfNegative", .InvertIfNegative
+            dict.Add "ThemeColor", .ThemeColor
+            dict.Add "TintAndShade", .TintAndShade
+        
+        ' Any other Pattern
+        Case Else
+            dict.Add "Pattern", .Pattern
+            dict.Add "PatternColor", .PatternColor
+            dict.Add "PatternColorIndex", .PatternColorIndex
+            dict.Add "PatternThemeColor", .PatternThemeColor
+            dict.Add "PatternTintAndShade", .PatternTintAndShade
+        End Select
+        
+    End With
 
     Set serializeInterior = dict
     
@@ -243,41 +495,192 @@ End Function
 Public Function deserializeInterior(ByRef dict As Dictionary, ByRef intr As Interior)
 
     On Error Resume Next
-
-    Debug.Print JsonConverter.ConvertToJson(dict, " ", 2)
-
-    With intr
     
+    With intr
         
-        If dict("Color") <> 0 Then
-            .Color = dict("Color")
-            .ColorIndex = dict("ColorIndex")
-            ' .Gradient = dict("Gradient")
-        End If
+        .InvertIfNegative = dict("InvertIfNegative")
         
+        ' Patterns
         If dict("Pattern") <> 0 Then
             .Pattern = dict("Pattern")
-            Select Case True
-            Case .Pattern = XlPattern.xlPatternLinearGradient
             
+            Select Case True
+            
+            Case .Pattern = XlPattern.xlPatternRectangularGradient
+                deserializeRectangularGradient dict("Gradient"), .Gradient
+                
+            Case .Pattern = XlPattern.xlPatternLinearGradient
+                deserializeLinearGradient dict("Gradient"), .Gradient
+            
+            Case .Pattern = XlPattern.xlPatternSolid
+                .ColorIndex = dict("ColorIndex")
+                .Color = dict("Color")
+                .TintAndShade = CDbl(dict("TintAndShade"))
+                
             Case Else
-                .PatternThemeColor = dict("PatternThemeColor")
-                .PatternColor = dict("PatternColor")
-                .PatternTintAndShade = dict("PatternTintAndShade")
+                .ColorIndex = XlColorIndex.xlColorIndexAutomatic
+                If dict("PatternThemeColor") <> 0 Then
+                    .PatternThemeColor = dict("PatternThemeColor")
+                Else
+                    .PatternColor = dict("PatternColor")
+                End If
+                .PatternTintAndShade = CDbl(dict("PatternTintAndShade"))
+            
             End Select
+            
+            Exit Function
         End If
         
+        ' No Pattern, with Themes
         If dict("ThemeColor") <> 0 Then
-            .PatternColorIndex = dict("PatternColorIndex")
+            .PatternColorIndex = XlPattern.xlPatternAutomatic
             .ThemeColor = dict("ThemeColor")
             .TintAndShade = CDbl(dict("TintAndShade"))
+            Exit Function
         End If
         
+        ' No Pattern, no Themes
+        If dict("Color") <> 0 Then
+            .PatternColorIndex = XlPattern.xlPatternAutomatic
+            .ColorIndex = IfEmpty(dict("ColorIndex"), XlColorIndex.xlColorIndexAutomatic)
+            .Color = dict("Color")
+            .TintAndShade = CDbl(dict("TintAndShade"))
+            Exit Function
+        End If
 
-        .InvertIfNegative = dict("InvertIfNegative")
     
     End With
 
+End Function
+
+
+Public Function serializeRectangularGradient(ByRef obj As RectangularGradient) As Dictionary
+
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
+    On Error Resume Next
+    
+    With obj
+        dict.Add "RectangleTop", .RectangleTop
+        dict.Add "RectangleBottom", .RectangleBottom
+        dict.Add "RectangleLeft", .RectangleLeft
+        dict.Add "RectangleRight", .RectangleRight
+        dict.Add "ColorStops", serializeColorStops(.ColorStops)
+    End With
+
+    Set serializeRectangularGradient = dict
+
+End Function
+
+Public Function deserializeRectangularGradient(ByRef dict As Dictionary, obj As RectangularGradient)
+    
+    On Error Resume Next
+    
+    With obj
+        .RectangleTop = dict("RectangleTop")
+        .RectangleBottom = dict("RectangleBottom")
+        .RectangleLeft = dict("RectangleLeft")
+        .RectangleRight = dict("RectangleRight")
+        
+        deserializeColorStops dict("ColorStops"), .ColorStops
+        
+    End With
+    
+End Function
+
+
+
+Public Function serializeColorStops(ByRef obj As ColorStops) As Dictionary
+    
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    Dim cs As ColorStop
+    Dim idx: idx = 1
+    
+    On Error Resume Next
+    
+    With obj
+        For Each cs In obj
+            dict.Add Format(idx, "000_"), serializeColorStop(cs)
+            idx = idx + 1
+        Next
+    End With
+
+    Set serializeColorStops = dict
+End Function
+
+Public Function deserializeColorStops(ByRef dict As Dictionary, obj As ColorStops)
+    
+    Dim key
+    
+    On Error Resume Next
+    
+    obj.Clear
+    
+    For Each key In dict.Keys
+        'If key <> "Class" Then
+            deserializeColorStop dict(key), obj.Add(dict(key)("Position"))
+        'End If
+    Next
+    
+End Function
+
+Public Function serializeColorStop(ByRef obj As ColorStop) As Dictionary
+    
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
+    On Error Resume Next
+    
+    With obj
+        dict.Add "Position", .Position
+        dict.Add "Color", .Color
+        dict.Add "ThemeColor", .ThemeColor
+        dict.Add "TintAndShade", .TintAndShade
+    End With
+
+    Set serializeColorStop = dict
+    
+End Function
+
+Public Function deserializeColorStop(ByRef dict As Dictionary, obj As ColorStop)
+    
+    On Error Resume Next
+    
+    With obj
+        If dict("ThemeColor") <> 0 Then
+            .ThemeColor = dict("ThemeColor")
+        Else
+            .Color = dict("Color")
+        End If
+        .TintAndShade = CDbl(dict("TintAndShade"))
+    End With
+    
+End Function
+
+Public Function serializeLinearGradient(ByRef obj As LinearGradient) As Dictionary
+    
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
+    On Error Resume Next
+    
+    With obj
+        dict.Add "Degree", .Degree
+        dict.Add "ColorStops", serializeColorStops(.ColorStops)
+    End With
+
+    Set serializeLinearGradient = dict
+    
+End Function
+
+Public Function deserializeLinearGradient(ByRef dict As Dictionary, obj As LinearGradient)
+    
+    On Error Resume Next
+    
+    With obj
+        .Degree = dict("Degree")
+        deserializeColorStops dict("ColorStops"), .ColorStops
+        
+    End With
+    
 End Function
 
 ' ------------------------------------------------------------------------------------------------------------
@@ -286,31 +689,29 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeBorders(ByRef brdrs As borders)
+Public Function serializeBorders(ByRef obj As borders)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Color", brdrs.Color
-    dict.Add "ColorIndex", brdrs.ColorIndex
-    dict.Add "LineStyle", brdrs.LineStyle
-    dict.Add "ThemeColor", brdrs.ThemeColor
-    dict.Add "TintAndShade", brdrs.TintAndShade
-    dict.Add "Value", brdrs.value
-    dict.Add "Weight", brdrs.Weight
-    
-    Dim dictBorders As New Dictionary
-    dictBorders.Add "xlDiagonalDown", serializeBorder(brdrs(xlDiagonalDown), xlDiagonalDown)
-    dictBorders.Add "xlDiagonalUp", serializeBorder(brdrs(xlDiagonalUp), xlDiagonalUp)
-    dictBorders.Add "xlEdgeBottom", serializeBorder(brdrs(xlEdgeBottom), xlEdgeBottom)
-    dictBorders.Add "xlEdgeLeft", serializeBorder(brdrs(xlEdgeLeft), xlEdgeLeft)
-    dictBorders.Add "xlEdgeRight", serializeBorder(brdrs(xlEdgeRight), xlEdgeRight)
-    dictBorders.Add "xlEdgeTop", serializeBorder(brdrs(xlEdgeTop), xlEdgeTop)
-    dictBorders.Add "xlInsideHorizontal", serializeBorder(brdrs(xlInsideHorizontal), xlInsideHorizontal)
-    dictBorders.Add "xlInsideVertical", serializeBorder(brdrs(xlInsideVertical), xlInsideVertical)
-    
-    dict.Add "Borders", dictBorders
+    With obj
+'        dict.Add "Color", .Color
+'        dict.Add "ColorIndex", .ColorIndex
+'        dict.Add "LineStyle", .LineStyle
+'        dict.Add "ThemeColor", .ThemeColor
+'        dict.Add "TintAndShade", .TintAndShade
+'        dict.Add "Value", .value
+'        dict.Add "Weight", .Weight
+        
+        Dim dictBorders As New Dictionary
+        dictBorders.Add "xlLeft", serializeBorder(obj(xlLeft), xlLeft)
+        dictBorders.Add "xlRight", serializeBorder(obj(xlRight), xlRight)
+        dictBorders.Add "xlTop", serializeBorder(obj(xlTop), xlTop)
+        dictBorders.Add "xlBottom", serializeBorder(obj(xlBottom), xlBottom)
+        
+        dict.Add "Borders", dictBorders
+    End With
     
     Set serializeBorders = dict
     
@@ -324,45 +725,35 @@ Public Function deserializeBorders(ByRef dict As Dictionary, ByRef brdrs As bord
     
     With brdrs
     
-        .Color = dict("Color")
-        .ColorIndex = dict("ColorIndex")
-        .LineStyle = dict("LineStyle")
-        .ThemeColor = dict("ThemeColor")
-        .TintAndShade = dict("TintAndShade")
-        .value = dict("Value")
-        .Weight = dict("Weight")
-    
-        Set dictBorder = dict("Borders")("xlDiagonalDown"): deserializeBorder dictBorder, brdrs(xlDiagonalDown)
-        Set dictBorder = dict("Borders")("xlDiagonalUp"): deserializeBorder dictBorder, brdrs(xlDiagonalUp)
-        Set dictBorder = dict("Borders")("xlEdgeBottom"): deserializeBorder dictBorder, brdrs(xlEdgeBottom)
-        Set dictBorder = dict("Borders")("xlEdgeLeft"): deserializeBorder dictBorder, brdrs(xlEdgeLeft)
-        Set dictBorder = dict("Borders")("xlEdgeRight"): deserializeBorder dictBorder, brdrs(xlEdgeRight)
-        Set dictBorder = dict("Borders")("xlEdgeTop"): deserializeBorder dictBorder, brdrs(xlEdgeTop)
-        Set dictBorder = dict("Borders")("xlInsideHorizontal"): deserializeBorder dictBorder, brdrs(xlInsideHorizontal)
-        Set dictBorder = dict("Borders")("xlInsideVertical"): deserializeBorder dictBorder, brdrs(xlInsideVertical)
+        Set dictBorder = dict("Borders")("xlLeft"): deserializeBorder dictBorder, brdrs(xlLeft)
+        Set dictBorder = dict("Borders")("xlRight"): deserializeBorder dictBorder, brdrs(xlRight)
+        Set dictBorder = dict("Borders")("xlTop"): deserializeBorder dictBorder, brdrs(xlTop)
+        Set dictBorder = dict("Borders")("xlBottom"): deserializeBorder dictBorder, brdrs(xlBottom)
     
     End With
     
 End Function
 
-Public Function serializeBorder(ByRef brdr As Border, brdrIndex As XlBordersIndex)
+Public Function serializeBorder(ByRef obj As Border, objIndex As XlBordersIndex)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    If IsNull(brdr.TintAndShade) Then
-        dict.Add "Active", False
-    Else
-        dict.Add "Active", True
-        dict.Add "BorderIndex", brdrIndex
-        dict.Add "Color", brdr.Color
-        dict.Add "ColorIndex", brdr.ColorIndex
-        dict.Add "LineStyle", brdr.LineStyle
-        dict.Add "ThemeColor", brdr.ThemeColor
-        dict.Add "Weight", brdr.Weight
-        dict.Add "TintAndShade", brdr.TintAndShade
-    End If
+    With obj
+        If .LineStyle = xlNone Or IsNull(.LineStyle) Then
+            dict.Add "Active", False
+        Else
+            dict.Add "Active", True
+            dict.Add "BorderIndex", objIndex
+            dict.Add "Color", .Color
+            dict.Add "ColorIndex", .ColorIndex
+            dict.Add "LineStyle", .LineStyle
+            dict.Add "ThemeColor", .ThemeColor
+            dict.Add "Weight", .Weight
+            dict.Add "TintAndShade", .TintAndShade
+        End If
+    End With
     
     Set serializeBorder = dict
     
@@ -375,13 +766,12 @@ Public Function deserializeBorder(ByRef dict As Dictionary, ByRef brdr As Border
     If dict("Active") = False Then Exit Function
     
     With brdr
-        .Color = dict("Color")
         .ColorIndex = dict("ColorIndex")
+        .Color = dict("Color")
         .LineStyle = dict("LineStyle")
         .ThemeColor = dict("ThemeColor")
-        .TintAndShade = dict("TintAndShade")
+        .TintAndShade = CDbl(dict("TintAndShade"))
         .Weight = dict("Weight")
-    
     End With
       
 End Function
@@ -392,26 +782,28 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeColorScale(ByRef cs As ColorScale)
+Public Function serializeColorScale(ByRef obj As ColorScale)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Class", "ColorScale"
-    dict.Add "AppliesTo", cs.AppliesTo.Address
-    dict.Add "Type", cs.Type
-    dict.Add "ColorScaleType", cs.ColorScaleCriteria.Count
-    dict.Add "ColorScaleCriteria", serializeColorScaleCriteria(cs.ColorScaleCriteria)
-    dict.Add "Formula", cs.Formula
-    dict.Add "StopIfTrue", cs.StopIfTrue
-    dict.Add "Priority", cs.Priority
-    dict.Add "PTCondition", cs.PTCondition
-    dict.Add "ScopeType", cs.ScopeType
-    
-    dict.Add "Font", serializeFont(cs.Font)
-    dict.Add "Interior", serializeInterior(cs.Interior)
-    dict.Add "Borders", serializeBorders(cs.borders)
+    With obj
+        dict.Add "Class", "ColorScale"
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "Type", .Type
+        dict.Add "ColorScaleType", .ColorScaleCriteria.Count
+        dict.Add "ColorScaleCriteria", serializeColorScaleCriteria(.ColorScaleCriteria)
+        dict.Add "Formula", .Formula
+        dict.Add "StopIfTrue", .StopIfTrue
+        dict.Add "Priority", .Priority
+        dict.Add "PTCondition", .PTCondition
+        dict.Add "ScopeType", .ScopeType
+        
+        dict.Add "Font", serializeFont(.Font)
+        dict.Add "Interior", serializeInterior(.Interior)
+        dict.Add "Borders", serializeBorders(.borders)
+    End With
     
     Set serializeColorScale = dict
     
@@ -430,7 +822,7 @@ Public Function deserializeColorScale(ByRef dict As Dictionary, Optional Workshe
         .Formula = dict("Formula")
         ' .StopIfTrue is read-only property for ColorScale
         .Priority = dict("Priority")
-        .NumberFormat = dict("NumberFormat")
+        .NumberFormat = IfEmpty(dict("NumberFormat"), "General")
         ' .PTCondition is read-only property
         
         deserializeFont dict("Font"), .Font
@@ -441,14 +833,15 @@ Public Function deserializeColorScale(ByRef dict As Dictionary, Optional Workshe
     
 End Function
 
-Public Function serializeColorScaleCriteria(ByRef cscriteria As ColorScaleCriteria)
+Public Function serializeColorScaleCriteria(ByRef obj As ColorScaleCriteria)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
     Dim cscriterion As ColorScaleCriterion
     Dim idx As Integer: idx = 0
     
     On Error Resume Next
-    For Each cscriterion In cscriteria
+    For Each cscriterion In obj
         idx = idx + 1
         dict.Add Format(idx, "000"), serializeColorScaleCriterion(cscriterion)
     Next
@@ -461,8 +854,6 @@ Public Function deserializeColorScaleCriteria(ByRef dict As Dictionary, ByRef cs
 
     On Error Resume Next
     
-    Dim dictBorder As Dictionary
-    
     With csa
         deserializeColorScaleCriterion dict("001"), .Item(1)
         deserializeColorScaleCriterion dict("002"), .Item(2)
@@ -474,15 +865,18 @@ Public Function deserializeColorScaleCriteria(ByRef dict As Dictionary, ByRef cs
     
 End Function
 
-Public Function serializeColorScaleCriterion(ByRef cscriterion As ColorScaleCriterion)
+Public Function serializeColorScaleCriterion(ByRef obj As ColorScaleCriterion)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
-    dict.Add "Index", cscriterion.Index
-    dict.Add "Type", cscriterion.Type
-    dict.Add "Value", cscriterion.value
-    dict.Add "FormatColor", serializeFormatColor(cscriterion.FormatColor)
+    
+    With obj
+        dict.Add "Index", .Index
+        dict.Add "Type", .Type
+        dict.Add "Value", .value
+        dict.Add "FormatColor", serializeFormatColor(.FormatColor)
+    End With
     
     Set serializeColorScaleCriterion = dict
     
@@ -507,16 +901,19 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeFormatColor(ByRef fmtclr As FormatColor) As Dictionary
+Public Function serializeFormatColor(ByRef obj As FormatColor) As Dictionary
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
-    dict.Add "Class", "FormatColor"
-    dict.Add "Color", fmtclr.Color
-    dict.Add "ColorIndex", fmtclr.ColorIndex
-    dict.Add "ThemeColor", fmtclr.ThemeColor
-    dict.Add "TintAndShade", fmtclr.TintAndShade
+    
+    With obj
+        dict.Add "Class", "FormatColor"
+        dict.Add "Color", .Color
+        dict.Add "ColorIndex", .ColorIndex
+        dict.Add "ThemeColor", .ThemeColor
+        dict.Add "TintAndShade", .TintAndShade
+    End With
     
     Set serializeFormatColor = dict
     
@@ -539,27 +936,29 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeIconSetCondition(ByRef isc As IconSetCondition) As Dictionary
+Public Function serializeIconSetCondition(ByRef obj As IconSetCondition) As Dictionary
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Class", "IconSetCondition"
-    dict.Add "AppliesTo", isc.AppliesTo.Address
-    dict.Add "AppliesToLocal", isc.AppliesTo.AddressLocal
-    dict.Add "Type", isc.Type
-    dict.Add "Formula", isc.Formula
-    
-    dict.Add "PercentileValues", isc.PercentileValues
-    dict.Add "Priority", isc.Priority
-    dict.Add "ReverseOrder", isc.ReverseOrder
-    dict.Add "ScopeType", isc.ScopeType
-    dict.Add "ShowIconOnly", isc.ShowIconOnly
-    dict.Add "StopIfTrue", isc.StopIfTrue
-    
-    dict.Add "IconSet", isc.IconSet.ID
-    dict.Add "IconCriteria", serializeIconCriteria(isc.IconCriteria)
+    With obj
+        dict.Add "Class", "IconSetCondition"
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "AppliesToLocal", .AppliesTo.AddressLocal
+        dict.Add "Type", .Type
+        dict.Add "Formula", .Formula
+        
+        dict.Add "PercentileValues", .PercentileValues
+        dict.Add "Priority", .Priority
+        dict.Add "ReverseOrder", .ReverseOrder
+        dict.Add "ScopeType", .ScopeType
+        dict.Add "ShowIconOnly", .ShowIconOnly
+        dict.Add "StopIfTrue", .StopIfTrue
+        
+        dict.Add "IconSet", .IconSet.ID
+        dict.Add "IconCriteria", serializeIconCriteria(.IconCriteria)
+    End With
     
     Set serializeIconSetCondition = dict
     
@@ -587,13 +986,14 @@ Public Function deserializeIconSetCondition(ByRef dict As Dictionary, Optional W
     
 End Function
 
-Public Function serializeIconCriteria(ByRef ic As IconCriteria)
+Public Function serializeIconCriteria(ByRef obj As IconCriteria)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
+    
     Dim icn As IconCriterion
     
     On Error Resume Next
-    For Each icn In ic
+    For Each icn In obj
         dict.Add Format(icn.Index, "000"), serializeIconCriterion(icn)
     Next
     Set serializeIconCriteria = dict
@@ -604,21 +1004,25 @@ Public Function deserializeIconCriteria(dict As Dictionary, ica As IconCriteria)
 
     Dim key
     Dim icn As Icon
+    
+    On Error Resume Next
     For Each key In dict.Keys
         deserializeIconCriterion dict(key), ica(Int(key))
     Next
 End Function
 
-Public Function serializeIconCriterion(ByRef icn As IconCriterion)
+Public Function serializeIconCriterion(ByRef obj As IconCriterion)
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Icon", icn.Icon
-    dict.Add "Operator", icn.Operator
-    dict.Add "Type", icn.Type
-    dict.Add "Value", icn.value
+    With obj
+        dict.Add "Icon", .Icon
+        dict.Add "Operator", .Operator
+        dict.Add "Type", .Type
+        dict.Add "Value", .value
+    End With
     
     Set serializeIconCriterion = dict
     
@@ -632,7 +1036,6 @@ Public Function deserializeIconCriterion(ByRef dict As Dictionary, icn As IconCr
     icn.Type = dict("Type")
     icn.value = dict("Value")
     
-
 End Function
 
 ' ------------------------------------------------------------------------------------------------------------
@@ -641,33 +1044,35 @@ End Function
 '
 ' ------------------------------------------------------------------------------------------------------------
 
-Public Function serializeDatabar(ByRef dbar As Databar) As Dictionary
+Public Function serializeDatabar(ByRef obj As Databar) As Dictionary
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    dict.Add "Class", "Databar"
-    dict.Add "AppliesTo", dbar.AppliesTo.Address
-    dict.Add "AppliesToLocal", dbar.AppliesTo.AddressLocal
-    dict.Add "Type", dbar.Type
-    dict.Add "AxisColor", serializeFormatColor(dbar.AxisColor)
-    dict.Add "AxisPosition", IfNull(dbar.AxisPosition, xlDataBarAxisAutomatic)
-    dict.Add "BarBorder", serializeDataBarBorder(dbar.BarBorder)
-    dict.Add "BarColor", serializeFormatColor(dbar.BarColor)
-    dict.Add "BarFillType", dbar.BarFillType
-    dict.Add "Direction", dbar.Direction
-    dict.Add "Formula", dbar.Formula
-    dict.Add "MaxPoint", serializeConditionValue(dbar.MaxPoint)
-    dict.Add "MinPoint", serializeConditionValue(dbar.MinPoint)
-    dict.Add "NegativeBarFormat", serializeNegativeBarFormat(dbar.NegativeBarFormat)
-    dict.Add "PercentMax", dbar.PercentMax
-    dict.Add "PercentMin", dbar.PercentMin
-    dict.Add "Priority", dbar.Priority
-    dict.Add "ScopeType", dbar.ScopeType
-    dict.Add "ShowValue", dbar.ShowValue
-    dict.Add "StopIfTrue", dbar.StopIfTrue
-    dict.Add "Type", dbar.Type
+    With obj
+        dict.Add "Class", "Databar"
+        dict.Add "AppliesTo", .AppliesTo.Address
+        dict.Add "AppliesToLocal", .AppliesTo.AddressLocal
+        dict.Add "Type", .Type
+        dict.Add "AxisColor", serializeFormatColor(.AxisColor)
+        dict.Add "AxisPosition", IfNull(.AxisPosition, xlDataBarAxisAutomatic)
+        dict.Add "BarBorder", serializeDataBarBorder(.BarBorder)
+        dict.Add "BarColor", serializeFormatColor(.BarColor)
+        dict.Add "BarFillType", .BarFillType
+        dict.Add "Direction", .Direction
+        dict.Add "Formula", .Formula
+        dict.Add "MaxPoint", serializeConditionValue(.MaxPoint)
+        dict.Add "MinPoint", serializeConditionValue(.MinPoint)
+        dict.Add "NegativeBarFormat", serializeNegativeBarFormat(.NegativeBarFormat)
+        dict.Add "PercentMax", .PercentMax
+        dict.Add "PercentMin", .PercentMin
+        dict.Add "Priority", .Priority
+        dict.Add "ScopeType", .ScopeType
+        dict.Add "ShowValue", .ShowValue
+        dict.Add "StopIfTrue", .StopIfTrue
+        dict.Add "Type", .Type
+    End With
     
     Set serializeDatabar = dict
     
@@ -702,13 +1107,13 @@ Public Function deserializeDatabar(ByRef dict As Dictionary, Optional Worksheet 
     
 End Function
 
-Public Function serializeConditionValue(ByRef cv As ConditionValue) As Dictionary
+Public Function serializeConditionValue(ByRef obj As ConditionValue) As Dictionary
     
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    With cv
+    With obj
         dict.Add "Class", "ConditionValue"
         dict.Add "Type", .Type
         dict.Add "Value", .value
@@ -729,13 +1134,13 @@ Public Function deserializeConditionValue(ByRef dict As Dictionary, ByRef cv As 
 End Function
 
 
-Public Function serializeNegativeBarFormat(ByRef nbf As NegativeBarFormat) As Dictionary
+Public Function serializeNegativeBarFormat(ByRef obj As NegativeBarFormat) As Dictionary
     
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
     
     On Error Resume Next
     
-    With nbf
+    With obj
         dict.Add "BorderColor", serializeFormatColor(.BorderColor)
         dict.Add "BorderColorType", .BorderColorType
         dict.Add "Color", serializeFormatColor(.Color)
@@ -759,12 +1164,12 @@ Public Function deserializeNegativeBarFormat(ByRef dict As Dictionary, ByRef nbf
     
 End Function
 
-Public Function serializeDataBarBorder(ByRef dbrd As DataBarBorder) As Dictionary
+Public Function serializeDataBarBorder(ByRef obj As DataBarBorder) As Dictionary
 
-    Dim dict As New Dictionary
+    Dim dict As New Dictionary: dict.Add "Class", TypeName(obj)
 
     On Error Resume Next
-    With dbrd
+    With obj
         dict.Add "Class", "DataBarBorder"
         dict.Add "Color", serializeFormatColor(.Color)
         dict.Add "Type", .Type
@@ -806,5 +1211,13 @@ Private Function IfNull(arg, nullVal)
         IfNull = nullVal
     Else
         IfNull = arg
+    End If
+End Function
+
+Private Function IfEmpty(arg, emptyVal)
+    If IsEmpty(arg) Then
+        IfEmpty = emptyVal
+    Else
+        IfEmpty = arg
     End If
 End Function
