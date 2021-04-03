@@ -9,6 +9,6 @@ This module's purpose is to save and restore all of a worksheets' Conditional Fo
 The module is still under development, and certainly still contains bugs in certain scenarios. It can probably also be modularized further.
 
 The module uses two other VBA tools:
-- VBA-KeyValueStore
+- [VBA-KeyValueStore](https://github.com/lehela/vba-library/tree/master/VBA-KeyValueStore)
 - [VBA-JSON](https://github.com/VBA-tools/VBA-JSON)
 
